@@ -11,6 +11,7 @@ from telegram.ext import (
     filters,
 )
 import asyncio
+import uuid
 
 # === НАСТРОЙКИ ===
 TOKEN = "8322042811:AAHzdQ-XFQvopNDSWXqe8zjeuvUjO0FH0ug"
@@ -22,7 +23,7 @@ BONUS_COOLDOWN_MINUTES = 60
 
 # === ГЛОБАЛЬНЫЕ ДАННЫЕ ===
 usernames_cache = {}
-duels = {}  # chat_id -> {"initiator_id": ..., "bet": ..., "message_id": ...}
+duels = {}  # duel_id -> {"chat_id": ..., "initiator_id": ..., "bet": ..., "message_id": ...}
 
 # === ЗАГРУЗКА / СОХРАНЕНИЕ ===
 if DATA_FILE.exists():
@@ -247,31 +248,52 @@ async def duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"💸 У тебя нет {bet} очков для дуэли. Баланс: {points}")
         return
 
-    if chat_id in duels:
-        await update.message.reply_text("⚠️ В этом чате уже есть активная дуэль.")
-        return
+    # Проверяем, есть ли уже активная дуэль в этом чате
+    for duel_data in duels.values():
+        if duel_data["chat_id"] == chat_id:
+            await update.message.reply_text("⚠️ В этом чате уже есть активная дуэль.")
+            return
 
+    # Создаем уникальный ID для дуэли
+    duel_id = str(uuid.uuid4())
+    
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚔️ Принять дуэль", callback_data=f"accept_duel:{chat_id}")]
+        [InlineKeyboardButton("⚔️ Принять дуэль", callback_data=f"accept_duel:{duel_id}")]
     ])
+    
     sent = await update.message.reply_text(
         f"💥 @{user.username} вызывает на дуэль на {bet} очков!\nКто осмелится принять вызов?",
         reply_markup=keyboard
     )
 
-    duels[chat_id] = {"initiator_id": user.id, "bet": bet, "message_id": sent.message_id}
+    duels[duel_id] = {
+        "chat_id": chat_id,
+        "initiator_id": user.id,
+        "initiator_username": user.username,
+        "bet": bet, 
+        "message_id": sent.message_id
+    }
 
 async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user = query.from_user
-    chat_id = query.message.chat_id
-    duel = duels.get(chat_id)
+    data = query.data
+    
+    try:
+        # Извлекаем duel_id из callback data
+        duel_id = data.split(":")[1]
+    except (IndexError, ValueError):
+        await query.answer("Ошибка в данных дуэли.", show_alert=True)
+        return
 
+    duel = duels.get(duel_id)
+    
     if not duel:
-        await query.answer("Дуэль уже не активна.", show_alert=True)
+        await query.answer("Дуэль уже не активна или не найдена.", show_alert=True)
         await query.edit_message_text("❌ Дуэль уже не активна.")
         return
 
+    chat_id = duel["chat_id"]
     initiator_id = duel["initiator_id"]
     bet = duel["bet"]
 
@@ -279,7 +301,6 @@ async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("Ты не можешь принять свою же дуэль.", show_alert=True)
         return
 
-    # Ответим только здесь, если все хорошо
     await query.answer("Дуэль принята! ⚔️")
 
     initiator_points = get_user_points(chat_id, initiator_id)
@@ -287,22 +308,24 @@ async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if initiator_points < bet:
         await query.edit_message_text("⚠️ У инициатора недостаточно очков. Дуэль отменена.")
-        duels.pop(chat_id, None)
+        duels.pop(duel_id, None)
         return
 
     if acceptor_points < bet:
         await query.edit_message_text("⚠️ У принимающего недостаточно очков. Дуэль отменена.")
-        duels.pop(chat_id, None)
+        duels.pop(duel_id, None)
         return
 
+    # Снимаем ставки
     update_user_points(chat_id, initiator_id, -bet)
     update_user_points(chat_id, user.id, -bet)
 
     await query.edit_message_text(
-        f"⚔️ Дуэль между @{get_username_by_id(initiator_id)} и @{user.username} началась!\n"
+        f"⚔️ Дуэль между @{duel['initiator_username']} и @{user.username} началась!\n"
         f"Каждый поставил {bet} очков!"
     )
 
+    # Бросаем кости
     sent1 = await context.bot.send_dice(chat_id, emoji="🎲")
     await asyncio.sleep(3)
     sent2 = await context.bot.send_dice(chat_id, emoji="🎲")
@@ -312,15 +335,16 @@ async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if roll1 > roll2:
         winner_id = initiator_id
-        winner_username = get_username_by_id(initiator_id)
+        winner_username = duel['initiator_username']
     elif roll2 > roll1:
         winner_id = user.id
         winner_username = user.username
     else:
+        # Ничья - возвращаем очки
         update_user_points(chat_id, initiator_id, bet)
         update_user_points(chat_id, user.id, bet)
         await context.bot.send_message(chat_id, "🤝 Ничья! Очки возвращены обоим.")
-        duels.pop(chat_id, None)
+        duels.pop(duel_id, None)
         return
 
     prize = bet * 2
@@ -332,7 +356,8 @@ async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎯 Баланс: {get_user_points(chat_id, winner_id)}"
     )
 
-    duels.pop(chat_id, None)
+    # Удаляем дуэль из памяти
+    duels.pop(duel_id, None)
 
 # === УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК ===
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
