@@ -266,8 +266,11 @@ async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = query.from_user
     chat_id = query.message.chat_id
 
+    # Всегда сразу отвечаем Telegram'у, иначе кнопка "висит"
+    await query.answer("Дуэль принята! ⚔️")
+
     if chat_id not in duels:
-        await query.answer("❌ Дуэль уже не активна.")
+        await query.edit_message_text("❌ Дуэль уже не активна.")
         return
 
     duel = duels[chat_id]
@@ -285,6 +288,7 @@ async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("⚠️ У инициатора недостаточно очков. Дуэль отменена.")
         duels.pop(chat_id, None)
         return
+
     if acceptor_points < bet:
         await query.edit_message_text("⚠️ У принимающего недостаточно очков. Дуэль отменена.")
         duels.pop(chat_id, None)
@@ -301,10 +305,8 @@ async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sent1 = await context.bot.send_dice(chat_id, emoji="🎲")
     await asyncio.sleep(3)
     sent2 = await context.bot.send_dice(chat_id, emoji="🎲")
-
     roll1 = sent1.dice.value
     roll2 = sent2.dice.value
-
     await asyncio.sleep(3)
 
     if roll1 > roll2:
@@ -322,11 +324,13 @@ async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     prize = bet * 2
     update_user_points(chat_id, winner_id, prize)
+
     await context.bot.send_message(
         chat_id,
         f"🏆 Победитель дуэли — @{winner_username}! Он забирает {prize} очков!\n"
         f"🎯 Баланс: {get_user_points(chat_id, winner_id)}"
     )
+
     duels.pop(chat_id, None)
 
 # === УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК ===
