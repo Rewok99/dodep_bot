@@ -14,7 +14,7 @@ import asyncio
 import uuid
 
 # === НАСТРОЙКИ ===
-TOKEN = "8322042811:AAHEw4aGF"
+TOKEN = "8322042811:AAHEw4aGFgZBy2gqOW6-oHxBS4emEUAIBF4"
 DATA_FILE = Path("data.json")
 CHANNEL_USERNAME = "@rewokayo"
 START_POINTS = 1000
@@ -226,6 +226,9 @@ async def give(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     chat_id = update.message.chat_id
+    # Получаем ID темы из исходного сообщения
+    message_thread_id = update.message.message_thread_id if update.message.message_thread_id else None
+    
     save_username(user, chat_id)
 
     args = update.message.text.strip().split()
@@ -271,7 +274,8 @@ async def duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "initiator_id": user.id,
         "initiator_username": user.username,
         "bet": bet, 
-        "message_id": sent.message_id
+        "message_id": sent.message_id,
+        "message_thread_id": message_thread_id  # Сохраняем ID темы
     }
 
 async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -296,6 +300,9 @@ async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = duel["chat_id"]
     initiator_id = duel["initiator_id"]
     bet = duel["bet"]
+    
+    # Получаем ID темы (топика) из исходного сообщения
+    message_thread_id = query.message.message_thread_id if query.message.message_thread_id else None
 
     if user.id == initiator_id:
         await query.answer("Ты не можешь принять свою же дуэль.", show_alert=True)
@@ -325,10 +332,18 @@ async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Каждый поставил {bet} очков!"
     )
 
-    # Бросаем кости
-    sent1 = await context.bot.send_dice(chat_id, emoji="🎲")
+    # Бросаем кости В ТОЙ ЖЕ ТЕМЕ
+    sent1 = await context.bot.send_dice(
+        chat_id, 
+        emoji="🎲",
+        message_thread_id=message_thread_id
+    )
     await asyncio.sleep(3)
-    sent2 = await context.bot.send_dice(chat_id, emoji="🎲")
+    sent2 = await context.bot.send_dice(
+        chat_id, 
+        emoji="🎲",
+        message_thread_id=message_thread_id
+    )
     roll1 = sent1.dice.value
     roll2 = sent2.dice.value
     await asyncio.sleep(3)
@@ -343,7 +358,11 @@ async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Ничья - возвращаем очки
         update_user_points(chat_id, initiator_id, bet)
         update_user_points(chat_id, user.id, bet)
-        await context.bot.send_message(chat_id, "🤝 Ничья! Очки возвращены обоим.")
+        await context.bot.send_message(
+            chat_id, 
+            "🤝 Ничья! Очки возвращены обоим.",
+            message_thread_id=message_thread_id
+        )
         duels.pop(duel_id, None)
         return
 
@@ -353,7 +372,8 @@ async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id,
         f"🏆 Победитель дуэли — @{winner_username}! Он забирает {prize} очков!\n"
-        f"🎯 Баланс: {get_user_points(chat_id, winner_id)}"
+        f"🎯 Баланс: {get_user_points(chat_id, winner_id)}",
+        message_thread_id=message_thread_id
     )
 
     # Удаляем дуэль из памяти
@@ -383,5 +403,3 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(accept_duel, pattern=r"^accept_duel:"))
     print("Бот запущен...")
     app.run_polling(drop_pending_updates=True)
-
-
