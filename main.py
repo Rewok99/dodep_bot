@@ -265,21 +265,22 @@ async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user = query.from_user
     chat_id = query.message.chat_id
+    duel = duels.get(chat_id)
 
-    # Всегда сразу отвечаем Telegram'у, иначе кнопка "висит"
-    await query.answer("Дуэль принята! ⚔️")
-
-    if chat_id not in duels:
+    if not duel:
+        await query.answer("Дуэль уже не активна.", show_alert=True)
         await query.edit_message_text("❌ Дуэль уже не активна.")
         return
 
-    duel = duels[chat_id]
     initiator_id = duel["initiator_id"]
     bet = duel["bet"]
 
     if user.id == initiator_id:
-        await query.answer("Ты не можешь принять свою же дуэль.")
+        await query.answer("Ты не можешь принять свою же дуэль.", show_alert=True)
         return
+
+    # Ответим только здесь, если все хорошо
+    await query.answer("Дуэль принята! ⚔️")
 
     initiator_points = get_user_points(chat_id, initiator_id)
     acceptor_points = get_user_points(chat_id, user.id)
