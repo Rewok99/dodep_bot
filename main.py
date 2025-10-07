@@ -14,7 +14,7 @@ import asyncio
 import uuid
 
 # === НАСТРОЙКИ ===
-TOKEN = "8322042811:AAHEw4aGFgZBy2gqOW6-oHxBS4emEUAIBF4"
+TOKEN = "8322042811:AAHEw4aGFgZBy2gqO"
 DATA_FILE = Path("data.json")
 CHANNEL_USERNAME = "@rewokayo"
 START_POINTS = 1000
@@ -403,3 +403,4 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(accept_duel, pattern=r"^accept_duel:"))
     print("Бот запущен...")
     app.run_polling(drop_pending_updates=True)
+
