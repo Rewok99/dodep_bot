@@ -14,7 +14,7 @@ import asyncio
 import uuid
 
 # === НАСТРОЙКИ ===
-TOKEN = "8322042811:AAHEw4aGFgZBy2gqO"
+TOKEN = "8322042811:AAHEw4aGFgZBy2gqOW6-oHxBS4emEUAIBF4"
 DATA_FILE = Path("data.json")
 CHANNEL_USERNAME = "@rewokayo"
 START_POINTS = 1000
@@ -226,7 +226,6 @@ async def give(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     chat_id = update.message.chat_id
-    # Получаем ID темы из исходного сообщения
     message_thread_id = update.message.message_thread_id if update.message.message_thread_id else None
     
     save_username(user, chat_id)
@@ -251,13 +250,11 @@ async def duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"💸 У тебя нет {bet} очков для дуэли. Баланс: {points}")
         return
 
-    # Проверяем, есть ли уже активная дуэль в этом чате
     for duel_data in duels.values():
         if duel_data["chat_id"] == chat_id:
             await update.message.reply_text("⚠️ В этом чате уже есть активная дуэль.")
             return
 
-    # Создаем уникальный ID для дуэли
     duel_id = str(uuid.uuid4())
     
     keyboard = InlineKeyboardMarkup([
@@ -275,23 +272,22 @@ async def duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "initiator_username": user.username,
         "bet": bet, 
         "message_id": sent.message_id,
-        "message_thread_id": message_thread_id  # Сохраняем ID темы
+        "message_thread_id": message_thread_id
     }
 
 async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user = query.from_user
     data = query.data
-    
+
     try:
-        # Извлекаем duel_id из callback data
         duel_id = data.split(":")[1]
     except (IndexError, ValueError):
         await query.answer("Ошибка в данных дуэли.", show_alert=True)
         return
 
     duel = duels.get(duel_id)
-    
+
     if not duel:
         await query.answer("Дуэль уже не активна или не найдена.", show_alert=True)
         await query.edit_message_text("❌ Дуэль уже не активна.")
@@ -300,9 +296,8 @@ async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = duel["chat_id"]
     initiator_id = duel["initiator_id"]
     bet = duel["bet"]
-    
-    # Получаем ID темы (топика) из исходного сообщения
-    message_thread_id = query.message.message_thread_id if query.message.message_thread_id else None
+    # Возьмём message_thread_id из сохранённой дуэли (если там есть), иначе — из callback-сообщения
+    message_thread_id = duel.get("message_thread_id") or getattr(query.message, "message_thread_id", None)
 
     if user.id == initiator_id:
         await query.answer("Ты не можешь принять свою же дуэль.", show_alert=True)
@@ -323,7 +318,6 @@ async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         duels.pop(duel_id, None)
         return
 
-    # Снимаем ставки
     update_user_points(chat_id, initiator_id, -bet)
     update_user_points(chat_id, user.id, -bet)
 
@@ -332,21 +326,35 @@ async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Каждый поставил {bet} очков!"
     )
 
-    # Бросаем кости В ТОЙ ЖЕ ТЕМЕ
-    sent1 = await context.bot.send_dice(
-        chat_id, 
-        emoji="🎲",
-        message_thread_id=message_thread_id
-    )
+    # ==== Исправленный блок броска кубиков ====
+    # Локальный импорт исключения — чтобы не трогать глобальные импорты
+    from telegram.error import BadRequest
+
+    dice_kwargs = {"chat_id": chat_id, "emoji": "🎲"}
+    if message_thread_id:
+        dice_kwargs["message_thread_id"] = message_thread_id
+
+    # отправка первого кубика с откатом, если тема не найдена
+    try:
+        sent1 = await context.bot.send_dice(**dice_kwargs)
+    except BadRequest as e:
+        # если тема оказалась неверной — убираем её и пробуем ещё раз в общий чат
+        dice_kwargs.pop("message_thread_id", None)
+        sent1 = await context.bot.send_dice(**dice_kwargs)
+
     await asyncio.sleep(3)
-    sent2 = await context.bot.send_dice(
-        chat_id, 
-        emoji="🎲",
-        message_thread_id=message_thread_id
-    )
+
+    # отправка второго кубика (возможно уже без message_thread_id после первого except)
+    try:
+        sent2 = await context.bot.send_dice(**dice_kwargs)
+    except BadRequest as e:
+        dice_kwargs.pop("message_thread_id", None)
+        sent2 = await context.bot.send_dice(**dice_kwargs)
+
     roll1 = sent1.dice.value
     roll2 = sent2.dice.value
     await asyncio.sleep(3)
+    # ==========================================
 
     if roll1 > roll2:
         winner_id = initiator_id
@@ -355,29 +363,41 @@ async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         winner_id = user.id
         winner_username = user.username
     else:
-        # Ничья - возвращаем очки
+        # ничья — возвращаем ставки; отправляем сообщение безопасно (с fallback)
         update_user_points(chat_id, initiator_id, bet)
         update_user_points(chat_id, user.id, bet)
-        await context.bot.send_message(
-            chat_id, 
-            "🤝 Ничья! Очки возвращены обоим.",
-            message_thread_id=message_thread_id
-        )
+        try:
+            await context.bot.send_message(
+                chat_id,
+                "🤝 Ничья! Очки возвращены обоим.",
+                message_thread_id=message_thread_id
+            )
+        except BadRequest:
+            await context.bot.send_message(
+                chat_id,
+                "🤝 Ничья! Очки возвращены обоим."
+            )
         duels.pop(duel_id, None)
         return
 
     prize = bet * 2
     update_user_points(chat_id, winner_id, prize)
 
-    await context.bot.send_message(
-        chat_id,
-        f"🏆 Победитель дуэли — @{winner_username}! Он забирает {prize} очков!\n"
-        f"🎯 Баланс: {get_user_points(chat_id, winner_id)}",
-        message_thread_id=message_thread_id
-    )
+    # отправляем сообщение о победителе с тем же безопасным фallback
+    try:
+        await context.bot.send_message(
+            chat_id,
+            f"🏆 Победитель дуэли — @{winner_username}! Он забирает {prize} очков!\n",
+            message_thread_id=message_thread_id
+        )
+    except BadRequest:
+        await context.bot.send_message(
+            chat_id,
+            f"🏆 Победитель дуэли — @{winner_username}! Он забирает {prize} очков!\n"
+        )
 
-    # Удаляем дуэль из памяти
     duels.pop(duel_id, None)
+
 
 # === УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК ===
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -403,4 +423,3 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(accept_duel, pattern=r"^accept_duel:"))
     print("Бот запущен...")
     app.run_polling(drop_pending_updates=True)
-
