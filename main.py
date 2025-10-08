@@ -14,7 +14,7 @@ import asyncio
 import uuid
 
 # === НАСТРОЙКИ ===
-TOKEN = "8322042UAIBF4"
+TOKEN = "8322042811:AAHEw4aGFgZBy2gqOW6-oHxBS4emEUAIBF4"
 DATA_FILE = Path("data.json")
 CHANNEL_USERNAME = "@rewokayo"
 START_POINTS = 1000
@@ -93,7 +93,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎰 !дэп <ставка> — сыграть в слот (например: !дэп 100)\n"
         "🎁 !бонус — получить бонус (раз в час)\n"
         "💸 !дать @логин 100 — перевести очки другому пользователю\n"
-        "⚔️ !дуэль <ставка> — вызвать кого-то на дуэль!"
+        "⚔️ !дуэль <ставка> — вызвать кого-то на дуэль!\n"
+        "🏆 !топ — рейтинг по очкам"
     )
 
 async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -221,6 +222,34 @@ async def give(update: Update, context: ContextTypes.DEFAULT_TYPE):
     update_user_points(chat_id, user.id, -amount)
     update_user_points(chat_id, target_id, amount)
     await update.message.reply_text(f"💸 Ты передал {amount} очков @{username} ✅")
+
+# === РЕЙТИНГ ===
+async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.message.from_user
+    chat_id = update.message.chat_id
+    save_username(user, chat_id)
+
+    chat_data = users_data.get(str(chat_id), {})
+    points_data = chat_data.get("points", {})
+
+    if not points_data:
+        await update.message.reply_text("Пока нет данных для рейтинга в этом чате.")
+        return
+
+    # Сортируем по очкам по убыванию
+    top = sorted(points_data.items(), key=lambda kv: kv[1], reverse=True)[:10]
+
+    lines = ["🏆 Топ по очкам в этом чате:"]
+    for idx, (uid_str, pts) in enumerate(top, start=1):
+        try:
+            uid = int(uid_str)
+        except ValueError:
+            uid = uid_str
+        uname = get_username_by_id(uid)
+        display = f"@{uname}" if uname != "неизвестный" else f"ID {uid_str}"
+        lines.append(f"{idx}. {display} — {pts}")
+
+    await update.message.reply_text("\n".join(lines))
 
 # === ДУЭЛЬ ===
 async def duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -414,6 +443,8 @@ async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await give(update, context)
     elif text.startswith("!дуэль"):
         await duel(update, context)
+    elif text.startswith("!топ"):
+        await leaderboard(update, context)
 
 # === ЗАПУСК ===
 if __name__ == "__main__":
@@ -423,4 +454,3 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(accept_duel, pattern=r"^accept_duel:"))
     print("Бот запущен...")
     app.run_polling(drop_pending_updates=True)
-
