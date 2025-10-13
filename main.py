@@ -14,12 +14,13 @@ import asyncio
 import uuid
 
 # === НАСТРОЙКИ ===
-TOKEN = "832204"
+TOKEN = "8322042811:AAHEw4aGFgZBy2gqOW6-oHxBS4emEUAIBF4"
 DATA_FILE = Path("data.json")
 CHANNEL_USERNAME = "@rewokayo"
 START_POINTS = 1000
 BONUS_POINTS = 1000
 BONUS_COOLDOWN_MINUTES = 60
+OKAK_REPLY = "ну вы поняли😂😂😂😂😂😂ОКАК😂😂😂😂😂😂молодежный мемчик😂😂😂😂😂😂 ржомба😂😂😂😂😂😂видно,человек с ю-м-о-р-о-м😂😂😂😂😂😂смешок😂😂😂😂😂😂я ржу во весь голос😂😂😂😂😂😂лютая шутка😂😂😂😂😂😂"
 
 # === ГЛОБАЛЬНЫЕ ДАННЫЕ ===
 usernames_cache = {}
@@ -84,6 +85,10 @@ def get_username_by_id(user_id):
         if uid == user_id:
             return uname
     return "неизвестный"
+
+# === ТРИГГЕРЫ СООБЩЕНИЙ ===
+async def handle_okak(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(OKAK_REPLY)
 
 # === КОМАНДЫ ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -432,7 +437,10 @@ async def accept_duel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message is None:
         return
-    text = update.message.text.lower()
+    text = update.message.text.lower().strip()
+    if text == "окак":
+        await handle_okak(update, context)
+        return
     if text.startswith("!баланс"):
         await balance(update, context)
     elif text.startswith("!дэп"):
@@ -454,4 +462,3 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(accept_duel, pattern=r"^accept_duel:"))
     print("Бот запущен...")
     app.run_polling(drop_pending_updates=True)
-
